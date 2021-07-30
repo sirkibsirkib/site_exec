@@ -1,5 +1,11 @@
 use super::*;
 
+enum InstructionResult {
+    NoProgress,
+    RemoveThis,
+    RemoveThisAndRestart,
+}
+
 impl SiteIdManager {
     pub fn new(my_site_id: SiteId) -> Self {
         Self {
@@ -33,6 +39,7 @@ impl SiteIdManager {
 
 impl SiteInner {
     const REQUEST_PERIOD: Duration = Duration::from_millis(300);
+
     fn send_to(&mut self, dest_id: SiteId, msg: Msg) {
         log!(
             self.logger,
@@ -43,11 +50,11 @@ impl SiteInner {
         );
         self.peer_outboxes.get(&dest_id).unwrap().send(msg).unwrap();
     }
-    fn try_complete(&mut self, instruction: &mut Instruction) -> bool {
+    fn try_complete(&mut self, instruction: &mut Instruction) -> InstructionResult {
         match instruction {
             Instruction::AcquireAssetFrom { asset_id, site_id } => {
                 if self.asset_store.contains_key(asset_id) {
-                    return true;
+                    return InstructionResult::RemoveThis;
                 }
                 let now = Instant::now();
                 let recent_request = self
@@ -63,16 +70,16 @@ impl SiteInner {
                     };
                     self.send_to(*site_id, msg);
                 }
-                false
+                InstructionResult::NoProgress
             }
             Instruction::SendAssetTo { asset_id, site_id } => {
                 if let Some(asset_data) = self.asset_store.get(&asset_id) {
                     let msg =
                         Msg::AssetData { asset_id: *asset_id, asset_data: asset_data.clone() };
                     self.send_to(*site_id, msg);
-                    true
+                    InstructionResult::RemoveThis
                 } else {
-                    false
+                    InstructionResult::NoProgress
                 }
             }
             Instruction::ComputeAssetData { outputs, inputs, compute_asset } => {
@@ -93,9 +100,9 @@ impl SiteInner {
                     for &output_id in outputs.iter() {
                         self.asset_store.insert(output_id, AssetData);
                     }
-                    true
+                    InstructionResult::RemoveThisAndRestart
                 } else {
-                    false
+                    InstructionResult::NoProgress
                 }
             }
         }
@@ -119,12 +126,16 @@ impl Site {
             // remove as many TODO instructions as possible
             let mut i = 0;
             while i < self.todo_instructions.len() {
-                let completed = self.inner.try_complete(&mut self.todo_instructions[i]);
-                if completed {
-                    self.todo_instructions.swap_remove(i);
-                    i = 0;
-                } else {
-                    i += 1;
+                let result = self.inner.try_complete(&mut self.todo_instructions[i]);
+                match result {
+                    InstructionResult::NoProgress => i += 1,
+                    InstructionResult::RemoveThis => {
+                        self.todo_instructions.swap_remove(i);
+                    }
+                    InstructionResult::RemoveThisAndRestart => {
+                        self.todo_instructions.swap_remove(i);
+                        i = 0;
+                    }
                 }
             }
 
@@ -153,7 +164,7 @@ impl Site {
                             requester,
                             msg
                         );
-                        self.inner.peer_outboxes.get(&requester).unwrap().send(msg).unwrap();
+                        self.inner.send_to(requester, msg);
                     } else {
                         self.todo_instructions
                             .push(Instruction::SendAssetTo { asset_id, site_id: requester });
