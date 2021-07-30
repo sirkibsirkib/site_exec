@@ -1,9 +1,8 @@
 use super::*;
 
-enum InstructionResult {
-    NoProgress,
-    RemoveThis,
-    RemoveThisAndRestart,
+enum InsExecResult {
+    Incomplete,
+    Complete { added_assets_to_store: bool },
 }
 
 impl SiteIdManager {
@@ -50,11 +49,11 @@ impl SiteInner {
         );
         self.peer_outboxes.get(&dest_id).unwrap().send(msg).unwrap();
     }
-    fn try_complete(&mut self, instruction: &mut Instruction) -> InstructionResult {
+    fn try_complete(&mut self, instruction: &mut Instruction) -> InsExecResult {
         match instruction {
             Instruction::AcquireAssetFrom { asset_id, site_id } => {
                 if self.asset_store.contains_key(asset_id) {
-                    return InstructionResult::RemoveThis;
+                    return InsExecResult::Incomplete;
                 }
                 let now = Instant::now();
                 let recent_request = self
@@ -70,16 +69,16 @@ impl SiteInner {
                     };
                     self.send_to(*site_id, msg);
                 }
-                InstructionResult::NoProgress
+                InsExecResult::Incomplete
             }
             Instruction::SendAssetTo { asset_id, site_id } => {
                 if let Some(asset_data) = self.asset_store.get(&asset_id) {
                     let msg =
                         Msg::AssetData { asset_id: *asset_id, asset_data: asset_data.clone() };
                     self.send_to(*site_id, msg);
-                    InstructionResult::RemoveThis
+                    InsExecResult::Incomplete
                 } else {
-                    InstructionResult::NoProgress
+                    InsExecResult::Incomplete
                 }
             }
             Instruction::ComputeAssetData { outputs, inputs, compute_asset } => {
@@ -100,9 +99,9 @@ impl SiteInner {
                     for &output_id in outputs.iter() {
                         self.asset_store.insert(output_id, AssetData);
                     }
-                    InstructionResult::RemoveThisAndRestart
+                    InsExecResult::Complete { added_assets_to_store: true }
                 } else {
-                    InstructionResult::NoProgress
+                    InsExecResult::Incomplete
                 }
             }
         }
@@ -122,57 +121,59 @@ impl Site {
 
     /// Consumes the calling thread
     pub fn execute(&mut self) {
-        loop {
-            // remove as many TODO instructions as possible
+        'execute_loop: loop {
+            // Any instruction might be completable!
+
             let mut i = 0;
             while i < self.todo_instructions.len() {
                 let result = self.inner.try_complete(&mut self.todo_instructions[i]);
                 match result {
-                    InstructionResult::NoProgress => i += 1,
-                    InstructionResult::RemoveThis => {
+                    InsExecResult::Incomplete => {
+                        // retain this instruction, consider the next
+                        i += 1;
+                    }
+                    InsExecResult::Complete { added_assets_to_store: false } => {
+                        // remove this instruction, consider all subsequent instructions
                         self.todo_instructions.swap_remove(i);
                     }
-                    InstructionResult::RemoveThisAndRestart => {
+                    InsExecResult::Complete { added_assets_to_store: true } => {
+                        // remove this instruction, consider all instructions
                         self.todo_instructions.swap_remove(i);
-                        i = 0;
+                        continue 'execute_loop;
                     }
                 }
             }
 
-            // receive a message
-            let msg = match self.inner.inbox.recv_timeout(Duration::from_secs(1)) {
-                Err(_) => {
-                    log!(
-                        self.inner.logger,
-                        "Site {:?} RECV timeout with\ntodo instructions {:#?}\nassets {:?}",
-                        self.inner.site_id_manager.my_site_id,
-                        &self.todo_instructions,
-                        self.inner.asset_store.keys().collect::<Vec<_>>()
-                    );
-                    return;
-                }
-                Ok(msg) => msg,
-            };
-            match msg {
-                Msg::AssetDataRequest { asset_id, requester } => {
-                    if let Some(asset_data) = self.inner.asset_store.get(&asset_id) {
-                        let msg = Msg::AssetData { asset_id, asset_data: asset_data.clone() };
+            // receive 1+ messages until we have further populated the asset store
+            loop {
+                let msg = match self.inner.inbox.recv_timeout(Duration::from_secs(1)) {
+                    Ok(msg) => msg,
+                    Err(_) => {
                         log!(
                             self.inner.logger,
-                            "Site {:?} replying to {:?} with msg {:?}",
+                            "Site {:?} RECV timeout with\ntodo instructions {:#?}\nassets {:?}",
                             self.inner.site_id_manager.my_site_id,
-                            requester,
-                            msg
+                            &self.todo_instructions,
+                            self.inner.asset_store.keys().collect::<Vec<_>>()
                         );
-                        self.inner.send_to(requester, msg);
-                    } else {
-                        self.todo_instructions
-                            .push(Instruction::SendAssetTo { asset_id, site_id: requester });
+                        return;
                     }
-                }
-                Msg::AssetData { asset_id, asset_data } => {
-                    self.inner.last_requested_at.remove(&asset_id);
-                    self.inner.asset_store.insert(asset_id, asset_data);
+                };
+                match msg {
+                    Msg::AssetDataRequest { asset_id, requester } => {
+                        if let Some(asset_data) = self.inner.asset_store.get(&asset_id) {
+                            let msg = Msg::AssetData { asset_id, asset_data: asset_data.clone() };
+                            self.inner.send_to(requester, msg);
+                        } else {
+                            self.todo_instructions
+                                .push(Instruction::SendAssetTo { asset_id, site_id: requester });
+                        }
+                    }
+                    Msg::AssetData { asset_id, asset_data } => {
+                        self.inner.last_requested_at.remove(&asset_id);
+                        self.inner.asset_store.insert(asset_id, asset_data);
+                        continue 'execute_loop;
+                    }
                 }
             }
         }
