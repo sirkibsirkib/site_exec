@@ -40,6 +40,7 @@ pub fn amy_bob_cho() {
     const AMY: SiteId = SiteId(0);
     const BOB: SiteId = SiteId(1);
     const CHO: SiteId = SiteId(2);
+
     let mut sites = setup_network(NetworkConfig {
         nodes: maplit::hashmap! {
             AMY => FileLogger::new("./logs/amy.txt"),

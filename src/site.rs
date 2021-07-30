@@ -40,20 +40,14 @@ impl SiteInner {
     const REQUEST_PERIOD: Duration = Duration::from_millis(300);
 
     fn send_to(&mut self, dest_id: SiteId, msg: Msg) {
-        log!(
-            self.logger,
-            "{:?} sending to {:?} msg {:?}",
-            self.site_id_manager.my_site_id,
-            dest_id,
-            &msg
-        );
+        log!(self.logger, "Sending to {:?} msg {:?}", dest_id, &msg);
         self.peer_outboxes.get(&dest_id).unwrap().send(msg).unwrap();
     }
     fn try_complete(&mut self, instruction: &mut Instruction) -> InsExecResult {
         match instruction {
             Instruction::AcquireAssetFrom { asset_id, site_id } => {
                 if self.asset_store.contains_key(asset_id) {
-                    return InsExecResult::Incomplete;
+                    return InsExecResult::Complete { added_assets_to_store: false };
                 }
                 let now = Instant::now();
                 let recent_request = self
@@ -62,6 +56,7 @@ impl SiteInner {
                     .map(|&at| now - at < Self::REQUEST_PERIOD)
                     .unwrap_or(false);
                 if !recent_request {
+                    // Did not recently request this asset! Do so!
                     self.last_requested_at.insert(*asset_id, now);
                     let msg = Msg::AssetDataRequest {
                         asset_id: *asset_id,
@@ -76,7 +71,7 @@ impl SiteInner {
                     let msg =
                         Msg::AssetData { asset_id: *asset_id, asset_data: asset_data.clone() };
                     self.send_to(*site_id, msg);
-                    InsExecResult::Incomplete
+                    InsExecResult::Complete { added_assets_to_store: false }
                 } else {
                     InsExecResult::Incomplete
                 }
@@ -90,8 +85,7 @@ impl SiteInner {
                 {
                     log!(
                         self.logger,
-                        "{:?} did a computation with outputs {:?} and inputs {:?} using {:?}",
-                        self.site_id_manager.my_site_id,
+                        "Did a computation with outputs {:?} and inputs {:?} using {:?}",
                         outputs,
                         inputs,
                         compute_asset
@@ -121,6 +115,14 @@ impl Site {
 
     /// Consumes the calling thread
     pub fn execute(&mut self) {
+        let start = Instant::now();
+
+        log!(
+            self.inner.logger,
+            "Started executing at {:?}. My site_id is {:?}",
+            &start,
+            self.inner.site_id_manager.my_site_id,
+        );
         'execute_loop: loop {
             // Any instruction might be completable!
 
@@ -143,6 +145,9 @@ impl Site {
                     }
                 }
             }
+            if self.todo_instructions.is_empty() {
+                log!(self.inner.logger, "Ran out of TODO instructions after {:?}", start.elapsed());
+            }
 
             // receive 1+ messages until we have further populated the asset store
             loop {
@@ -151,14 +156,14 @@ impl Site {
                     Err(_) => {
                         log!(
                             self.inner.logger,
-                            "Site {:?} RECV timeout with\ntodo instructions {:#?}\nassets {:?}",
-                            self.inner.site_id_manager.my_site_id,
+                            "RECV timeout with todo instructions {:#?} assets {:?}",
                             &self.todo_instructions,
-                            self.inner.asset_store.keys().collect::<Vec<_>>()
+                            self.inner.asset_store.keys()
                         );
                         return;
                     }
                 };
+                log!(self.inner.logger, "Received msg {:?}", msg);
                 match msg {
                     Msg::AssetDataRequest { asset_id, requester } => {
                         if let Some(asset_data) = self.inner.asset_store.get(&asset_id) {
