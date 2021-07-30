@@ -1,0 +1,4 @@
+>> Site SiteId(2) replying to SiteId(1) with msg AssetData { asset_id: AssetId(0, 3), asset_data: AssetData }
+>> Site SiteId(2) RECV timeout with
+todo instructions []
+assets [AssetId(0, 3)]

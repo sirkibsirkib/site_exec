@@ -1,0 +1,5 @@
+>> SiteId(0) sending to SiteId(1) msg AssetDataRequest { asset_id: AssetId(0, 2), requester: SiteId(0) }
+>> SiteId(0) sending to SiteId(1) msg AssetData { asset_id: AssetId(0, 0), asset_data: AssetData }
+>> Site SiteId(0) RECV timeout with
+todo instructions []
+assets [AssetId(0, 0), AssetId(0, 2)]
