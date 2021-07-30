@@ -307,9 +307,9 @@ fn main() {
     const CHO: SiteId = SiteId(2);
     let mut sites = setup_network(NetworkConfig {
         nodes: maplit::hashmap! {
-            AMY => Box::new(FileLogger::new("./amy.txt")) as Box<_>,
-            BOB => Box::new(FileLogger::new("./bob.txt")) as Box<_>,
-            CHO => Box::new(FileLogger::new("./cho.txt")) as Box<_>,
+            AMY => Box::new(FileLogger::new("./logs/amy.txt")) as Box<_>,
+            BOB => Box::new(FileLogger::new("./logs/bob.txt")) as Box<_>,
+            CHO => Box::new(FileLogger::new("./logs/cho.txt")) as Box<_>,
         },
         bidir_edges: vec![[AMY, BOB], [BOB, CHO]],
     });

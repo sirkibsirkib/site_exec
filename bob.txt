@@ -1,6 +1,0 @@
->> SiteId(1) sending to SiteId(2) msg AssetDataRequest { asset_id: AssetId(0, 3), requester: SiteId(1) }
->> SiteId(1) did a computation with outputs [AssetId(0, 2)] and inputs [AssetId(0, 0), AssetId(0, 1)] using AssetId(0, 3)
->> SiteId(1) sending to SiteId(0) msg AssetData { asset_id: AssetId(0, 2), asset_data: AssetData }
->> Site SiteId(1) RECV timeout with
-todo instructions []
-assets [AssetId(0, 3), AssetId(0, 1), AssetId(0, 0), AssetId(0, 2)]
