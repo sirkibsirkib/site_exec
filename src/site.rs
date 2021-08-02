@@ -5,26 +5,31 @@ enum InsExecResult {
     Complete { added_assets_to_store: bool },
 }
 
-impl SiteIdManager {
-    pub fn new(my_site_id: SiteId) -> Self {
-        Self {
-            my_site_id,
-            asset_index_list: Default::default(),
-            asset_index_seq_head: Some(AssetIndex(0)),
-        }
-    }
-    pub fn alloc_asset_id(&mut self) -> Option<AssetId> {
+impl AssetIdAllocator for SiteIdManager {
+    fn alloc_asset_id(&mut self) -> Option<AssetId> {
         self.asset_index_list
             .pop()
             .or_else(|| {
                 self.asset_index_seq_head.take().map(|AssetIndex(i)| {
                     if let Some(ip1) = i.checked_add(1) {
                         self.asset_index_seq_head = Some(AssetIndex(ip1));
+                    } else {
+                        // leave self.asset_index_seq_head is None (for next time)
                     }
                     AssetIndex(i)
                 })
             })
             .map(|asset_index| AssetId { site_id: self.my_site_id, asset_index })
+    }
+}
+impl SiteIdManager {
+    pub fn new(my_site_id: SiteId) -> Self {
+        Self {
+            my_site_id,
+            // Initially, all AssetIndexes in range [0..) are available
+            asset_index_list: Default::default(),
+            asset_index_seq_head: Some(AssetIndex(0)),
+        }
     }
     pub fn try_free_asset_id(&mut self, asset_id: AssetId) -> bool {
         if asset_id.site_id == self.my_site_id {
@@ -43,7 +48,7 @@ impl SiteInner {
         log!(self.logger, "Sending to {:?} msg {:?}", dest_id, &msg);
         self.peer_outboxes.get(&dest_id).unwrap().send(msg).unwrap();
     }
-    fn try_complete(&mut self, instruction: &mut Instruction<AssetId>) -> InsExecResult {
+    fn try_complete(&mut self, instruction: &mut Instruction) -> InsExecResult {
         match instruction {
             Instruction::AcquireAssetFrom { asset_id, site_id } => {
                 if self.asset_store.contains_key(asset_id) {
@@ -76,13 +81,13 @@ impl SiteInner {
                     InsExecResult::Incomplete
                 }
             }
-            Instruction::ComputeAssetData(parameterized_compute) => {
-                if parameterized_compute
+            Instruction::ComputeAssetData(compute_args) => {
+                if compute_args
                     .needed_assets()
                     .all(|asset_id| self.asset_store.contains_key(&asset_id))
                 {
-                    log!(self.logger, "Did a computation with {:?} ", &parameterized_compute);
-                    for &output_id in parameterized_compute.outputs.iter() {
+                    log!(self.logger, "Did a computation with {:?} ", &compute_args);
+                    for &output_id in compute_args.outputs.iter() {
                         self.asset_store.insert(output_id, AssetData);
                     }
                     InsExecResult::Complete { added_assets_to_store: true }

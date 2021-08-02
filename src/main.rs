@@ -22,6 +22,7 @@ use std::{
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 struct SiteId(u32);
 
+// AssetIndexes identify assets within some context (e.g. a particular Site).
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 struct AssetIndex(u32);
 
@@ -32,12 +33,16 @@ struct AssetId {
     asset_index: AssetIndex,
 }
 
-// Asset names identify assets within some implicit context. E.g. they express equality between assets within in a set of instructions without specifying the AssetId.
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
-enum AssetIdOrName {
-    Id { asset_id: AssetId },
-    Name { index: u32 },
+trait AssetIdAllocator {
+    fn alloc_asset_id(&mut self) -> Option<AssetId>;
 }
+
+// "Asset Name" may be concrete (a global identifier) or abstract (meaningful within some implicit context)
+// #[derive(Copy, Clone, Eq, PartialEq, Hash)]
+// enum AssetName {
+//     Concrete { asset_id: AssetId },
+//     Abstract { index: AssetIndex },
+// }
 
 /// Message structure communicated between sites (over channels)
 #[derive(Debug)]
@@ -52,30 +57,23 @@ struct AssetData;
 #[derive(Debug)]
 struct SiteIdManager {
     my_site_id: SiteId,
-    asset_index_list: Vec<AssetIndex>,
-    asset_index_seq_head: Option<AssetIndex>,
+    // The following pair of fields keeps track of a pool of AssetIds available for allocation.
+    asset_index_list: Vec<AssetIndex>, // explicitly enumerates available AssetIds.
+    asset_index_seq_head: Option<AssetIndex>, // represents all AssetIds in range [asset_index_list..)
 }
 
-#[derive(Debug)]
-struct ParameterizedCompute {
+#[derive(Debug, Eq, PartialEq, Hash)]
+struct ComputeArgs {
     inputs: Vec<AssetId>,
     outputs: Vec<AssetId>,
     compute_asset: AssetId,
 }
 
 #[derive(Debug)]
-struct Problem {
-    may_access: HashMap<AssetId, HashSet<SiteId>>,
-    may_compute: HashSet<(SiteId, AssetId)>,
-    assets_at_sites: HashMap<AssetId, HashSet<SiteId>>,
-    do_compute: HashSet<ParameterizedCompute>, // outputs are, implicitly, goals
-}
-
-#[derive(Debug)]
-enum Instruction<A> {
-    SendAssetTo { asset_id: A, site_id: SiteId },
-    AcquireAssetFrom { asset_id: A, site_id: SiteId },
-    ComputeAssetData(ParameterizedCompute),
+enum Instruction {
+    SendAssetTo { asset_id: AssetId, site_id: SiteId },
+    AcquireAssetFrom { asset_id: AssetId, site_id: SiteId },
+    ComputeAssetData(ComputeArgs),
 }
 
 #[derive(Debug)]
@@ -90,7 +88,7 @@ struct SiteInner {
 
 #[derive(Debug)]
 struct Site {
-    todo_instructions: Vec<Instruction<AssetId>>, // Order is irrelevant. Using a vector because its easily iterable.
+    todo_instructions: Vec<Instruction>, // Order is irrelevant. Using a vector because its easily iterable.
     inner: SiteInner,
 }
 
@@ -98,9 +96,23 @@ struct NetworkConfig {
     nodes: HashMap<SiteId, Box<dyn Logger>>,
     bidir_edges: Vec<[SiteId; 2]>,
 }
+
+#[derive(Debug)]
+struct Problem {
+    may_access: HashSet<(SiteId, AssetId)>,
+    may_compute: HashSet<(SiteId, AssetId)>,
+    site_has_asset: HashSet<(SiteId, AssetId)>,
+    do_compute: Vec<ComputeArgs>, // outputs are implicit goals
+}
+
+#[derive(Debug)]
+enum PlanError<'a> {
+    CyclicCausality(&'a ComputeArgs),
+    NoSiteForCompute(&'a ComputeArgs),
+}
 ////////////////////////////////////////////////
 
-impl ParameterizedCompute {
+impl ComputeArgs {
     fn needed_assets(&self) -> impl Iterator<Item = &AssetId> + '_ {
         self.inputs.iter().chain(Some(&self.compute_asset))
     }
@@ -133,5 +145,5 @@ impl Logger for FileLogger {
 ////////////////////////////////////////////////
 
 fn main() {
-    scenario::amy_bob_cho()
+    scenario::scenario_amy_bob_cho()
 }

@@ -30,6 +30,25 @@ fn setup_network(network_config: NetworkConfig) -> HashMap<SiteId, Site> {
     sites
 }
 
+pub fn scenario_amy_bob_cho() {
+    let mut allocator = SiteIdManager::new(SiteId(42));
+    let x = allocator.alloc_asset_id().unwrap();
+    let y = allocator.alloc_asset_id().unwrap();
+    let z = allocator.alloc_asset_id().unwrap();
+    let f = allocator.alloc_asset_id().unwrap();
+    let problem = Problem {
+        may_access: maplit::hashset! {
+            (SiteId(0), x), (SiteId(1), x),
+            (SiteId(1), y),
+            (SiteId(1), f), (SiteId(2), f)
+        },
+        may_compute: maplit::hashset! { (SiteId(1), f) },
+        site_has_asset: maplit::hashset! { (SiteId(0), x), (SiteId(1), y) , (SiteId(2), f)  },
+        do_compute: vec![ComputeArgs { inputs: vec![x, y], outputs: vec![z], compute_asset: f }],
+    };
+    planning::plan(&problem, &mut allocator).unwrap();
+}
+
 pub fn amy_bob_cho() {
     /*
     example scenario:
@@ -68,7 +87,7 @@ pub fn amy_bob_cho() {
     let site = sites.get_mut(&BOB).unwrap();
     site.inner.asset_store.insert(aid_y, AssetData);
     site.todo_instructions.push(Instruction::AcquireAssetFrom { asset_id: aid_f, site_id: CHO });
-    site.todo_instructions.push(Instruction::ComputeAssetData(ParameterizedCompute {
+    site.todo_instructions.push(Instruction::ComputeAssetData(ComputeArgs {
         outputs: vec![aid_z],
         inputs: vec![aid_x, aid_y],
         compute_asset: aid_f,
