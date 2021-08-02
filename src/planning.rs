@@ -33,6 +33,25 @@ use super::*;
 //     }
 // }
 
+fn sequenced_compute(problem: &Problem) -> Result<Vec<&ComputeArgs>, &ComputeArgs> {
+    // Symbolic execution of ComputeAssetData instructions. If we get stuck -> planning impossible.
+    let mut compute_sequence = Vec::with_capacity(problem.do_compute.len());
+    let mut someone_has_asset: HashSet<AssetId> =
+        problem.site_has_asset.iter().map(|(_site_id, asset_id)| *asset_id).collect();
+    let mut compute_todo: Vec<&ComputeArgs> = problem.do_compute.iter().collect();
+    let mut i = 0;
+    while i < compute_todo.len() {
+        let compute_args = &compute_todo[i];
+        if compute_args.needed_assets().all(|asset_id| someone_has_asset.contains(asset_id)) {
+            someone_has_asset.extend(compute_args.outputs.iter().copied());
+            compute_sequence.push(compute_todo.swap_remove(i));
+        } else {
+            i += 1;
+        }
+    }
+    compute_todo.iter().copied().next().ok_or(compute_sequence).map_or_else(Ok, Err)
+}
+
 fn site_for_computes<'a, 'b>(
     problem: &'a Problem,
     computed_order: &'b [&'a ComputeArgs],
@@ -60,34 +79,31 @@ fn site_for_computes<'a, 'b>(
         .collect()
 }
 
-fn compute_order(problem: &Problem) -> Result<Vec<&ComputeArgs>, &ComputeArgs> {
-    // Symbolic execution of ComputeAssetData instructions. If we get stuck -> planning impossible.
-    let mut computed_order = Vec::with_capacity(problem.do_compute.len());
-    let mut someone_has_asset: HashSet<AssetId> =
-        problem.site_has_asset.iter().map(|(_site_id, asset_id)| *asset_id).collect();
-    let mut compute_todo: Vec<&ComputeArgs> = problem.do_compute.iter().collect();
-    let mut i = 0;
-    while i < compute_todo.len() {
-        let compute_args = &compute_todo[i];
-        if compute_args.needed_assets().all(|asset_id| someone_has_asset.contains(asset_id)) {
-            someone_has_asset.extend(compute_args.outputs.iter().copied());
-            computed_order.push(compute_todo.swap_remove(i));
-        } else {
-            i += 1;
-        }
-    }
-    compute_todo.iter().copied().next().ok_or(computed_order).map_or_else(Ok, Err)
-}
-
 pub(crate) fn plan<'a>(
     problem: &'a Problem,
     allocator: &mut impl AssetIdAllocator,
 ) -> Result<HashMap<Site, Vec<Instruction>>, PlanError<'a>> {
-    let computed_order = compute_order(problem).map_err(PlanError::CyclicCausality)?;
-    let site_order =
-        site_for_computes(problem, &computed_order).map_err(PlanError::NoSiteForCompute)?;
-    println!("{:?}", site_order);
-    Ok(Default::default())
+    /*
+    Find a sequence of compute steps (i.e. total ordering) s.t. no element is causally dependent on a later element.
+    While this result isn't returned to the caller, this step is important two two reasons:
+    1. failure to find such a sequence indicates a problem containing a cyclic causal dependency
+    2. the found sequence can be used to drive the sequential procedure used to search the ComputeArgs->SiteId solution space.
+    */
+    let compute_sequence: Vec<&ComputeArgs> =
+        sequenced_compute(problem).map_err(PlanError::CyclicCausality)?;
+
+    let mut result = HashMap::<Site, Vec<Instruction>>::default();
+    let mut site_has_asset = problem.site_has_asset.clone();
+    for compute_args in compute_sequence {
+        // TODO where to go?
+        // TODO can I assume all-to-all reachability or must I consider routing?
+    }
+    Ok(result)
+
+    // let site_order =
+    //     site_for_computes(problem, &compute_sequence).map_err(PlanError::NoSiteForCompute)?;
+    // println!("{:?}", site_order);
+    // Ok(Default::default())
     // Symbolic execution of ComputeAssetData instructions. If we get stuck -> planning impossible.
     // let mut site_has_asset = problem.site_has_asset.clone();
     // let mut someone_has_asset: HashSet<AssetId> =
@@ -129,10 +145,4 @@ pub(crate) fn plan<'a>(
     // }
     // // ret
     // todo!()
-}
-
-pub(crate) fn plan2<'a>(
-    problem: &'a Problem,
-) -> Result<HashMap<Site, Vec<Instruction>>, PlanError<'a>> {
-    todo!()
 }
