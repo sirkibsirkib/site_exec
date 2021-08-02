@@ -5,7 +5,9 @@ pub(crate) enum PlanError<'a> {
     NoSiteForCompute(&'a ParameterizedCompute),
 }
 
-pub(crate) fn plan(problem: &Problem) -> Result<HashMap<Site, Vec<Instruction>>, PlanError> {
+pub(crate) fn plan(
+    problem: &Problem,
+) -> Result<HashMap<Site, Vec<Instruction<AssetIdOrName>>>, PlanError> {
     // NOTE: define
     let mut unrached_compute: Vec<&ParameterizedCompute> = problem.do_compute.iter().collect();
     let mut compute_at = Vec::with_capacity(unrached_compute.len());

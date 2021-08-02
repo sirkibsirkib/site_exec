@@ -43,7 +43,7 @@ impl SiteInner {
         log!(self.logger, "Sending to {:?} msg {:?}", dest_id, &msg);
         self.peer_outboxes.get(&dest_id).unwrap().send(msg).unwrap();
     }
-    fn try_complete(&mut self, instruction: &mut Instruction) -> InsExecResult {
+    fn try_complete(&mut self, instruction: &mut Instruction<AssetId>) -> InsExecResult {
         match instruction {
             Instruction::AcquireAssetFrom { asset_id, site_id } => {
                 if self.asset_store.contains_key(asset_id) {

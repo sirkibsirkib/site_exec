@@ -25,10 +25,18 @@ struct SiteId(u32);
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 struct AssetIndex(u32);
 
+// Asset IDs identify assets within an entire network ('globally')
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 struct AssetId {
     site_id: SiteId,
     asset_index: AssetIndex,
+}
+
+// Asset names identify assets within some implicit context. E.g. they express equality between assets within in a set of instructions without specifying the AssetId.
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+enum AssetIdOrName {
+    Id { asset_id: AssetId },
+    Name { index: u32 },
 }
 
 /// Message structure communicated between sites (over channels)
@@ -64,9 +72,9 @@ struct Problem {
 }
 
 #[derive(Debug)]
-enum Instruction {
-    SendAssetTo { asset_id: AssetId, site_id: SiteId },
-    AcquireAssetFrom { asset_id: AssetId, site_id: SiteId },
+enum Instruction<A> {
+    SendAssetTo { asset_id: A, site_id: SiteId },
+    AcquireAssetFrom { asset_id: A, site_id: SiteId },
     ComputeAssetData(ParameterizedCompute),
 }
 
@@ -82,7 +90,7 @@ struct SiteInner {
 
 #[derive(Debug)]
 struct Site {
-    todo_instructions: Vec<Instruction>, // Order is irrelevant. Using a vector because its easily iterable.
+    todo_instructions: Vec<Instruction<AssetId>>, // Order is irrelevant. Using a vector because its easily iterable.
     inner: SiteInner,
 }
 
