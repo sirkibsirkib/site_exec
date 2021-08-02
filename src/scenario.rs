@@ -40,7 +40,6 @@ pub fn amy_bob_cho() {
     const AMY: SiteId = SiteId(0);
     const BOB: SiteId = SiteId(1);
     const CHO: SiteId = SiteId(2);
-
     let mut sites = setup_network(NetworkConfig {
         nodes: maplit::hashmap! {
             AMY => FileLogger::new("./logs/amy.txt"),
@@ -54,11 +53,14 @@ pub fn amy_bob_cho() {
 
     // AMY
     let site = sites.get_mut(&AMY).unwrap();
+    // AMY allocates the identifiers for all assets, present and future (I, the planner, am using her allocator)
     let aid_x = site.inner.site_id_manager.alloc_asset_id().unwrap(); // 0,0
     let aid_y = site.inner.site_id_manager.alloc_asset_id().unwrap(); // 0,1
     let aid_z = site.inner.site_id_manager.alloc_asset_id().unwrap(); // 0,2
     let aid_f = site.inner.site_id_manager.alloc_asset_id().unwrap(); // 0,3
+                                                                      // "create" dataset X at AMY (dummy data)
     site.inner.asset_store.insert(aid_x, AssetData);
+    // "create" dataset X at AMY (dummy data)
     site.todo_instructions.push(Instruction::AcquireAssetFrom { asset_id: aid_z, site_id: BOB });
     site.todo_instructions.push(Instruction::SendAssetTo { asset_id: aid_x, site_id: BOB });
 
@@ -66,11 +68,11 @@ pub fn amy_bob_cho() {
     let site = sites.get_mut(&BOB).unwrap();
     site.inner.asset_store.insert(aid_y, AssetData);
     site.todo_instructions.push(Instruction::AcquireAssetFrom { asset_id: aid_f, site_id: CHO });
-    site.todo_instructions.push(Instruction::ComputeAssetData {
+    site.todo_instructions.push(Instruction::ComputeAssetData(ParameterizedCompute {
         outputs: vec![aid_z],
         inputs: vec![aid_x, aid_y],
         compute_asset: aid_f,
-    });
+    }));
 
     // CHO
     let site = sites.get_mut(&CHO).unwrap();

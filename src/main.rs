@@ -6,11 +6,12 @@ macro_rules! log {
     }};
 }
 
+mod planning;
 mod scenario;
 mod site;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::File,
     io::Write,
     path::Path,
@@ -48,10 +49,25 @@ struct SiteIdManager {
 }
 
 #[derive(Debug)]
+struct ParameterizedCompute {
+    inputs: Vec<AssetId>,
+    outputs: Vec<AssetId>,
+    compute_asset: AssetId,
+}
+
+#[derive(Debug)]
+struct Problem {
+    may_access: HashMap<AssetId, HashSet<SiteId>>,
+    may_compute: HashSet<(SiteId, AssetId)>,
+    assets_at_sites: HashMap<AssetId, HashSet<SiteId>>,
+    do_compute: HashSet<ParameterizedCompute>, // outputs are, implicitly, goals
+}
+
+#[derive(Debug)]
 enum Instruction {
     SendAssetTo { asset_id: AssetId, site_id: SiteId },
     AcquireAssetFrom { asset_id: AssetId, site_id: SiteId },
-    ComputeAssetData { outputs: Vec<AssetId>, inputs: Vec<AssetId>, compute_asset: AssetId },
+    ComputeAssetData(ParameterizedCompute),
 }
 
 #[derive(Debug)]
@@ -66,7 +82,7 @@ struct SiteInner {
 
 #[derive(Debug)]
 struct Site {
-    todo_instructions: Vec<Instruction>,
+    todo_instructions: Vec<Instruction>, // Order is irrelevant. Using a vector because its easily iterable.
     inner: SiteInner,
 }
 
@@ -75,6 +91,12 @@ struct NetworkConfig {
     bidir_edges: Vec<[SiteId; 2]>,
 }
 ////////////////////////////////////////////////
+
+impl ParameterizedCompute {
+    fn needed_assets(&self) -> impl Iterator<Item = &AssetId> + '_ {
+        self.inputs.iter().chain(Some(&self.compute_asset))
+    }
+}
 
 impl std::fmt::Debug for AssetId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

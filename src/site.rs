@@ -76,21 +76,13 @@ impl SiteInner {
                     InsExecResult::Incomplete
                 }
             }
-            Instruction::ComputeAssetData { outputs, inputs, compute_asset } => {
-                if inputs
-                    .iter()
-                    .copied()
-                    .chain(Some(*compute_asset))
+            Instruction::ComputeAssetData(parameterized_compute) => {
+                if parameterized_compute
+                    .needed_assets()
                     .all(|asset_id| self.asset_store.contains_key(&asset_id))
                 {
-                    log!(
-                        self.logger,
-                        "Did a computation with outputs {:?} and inputs {:?} using {:?}",
-                        outputs,
-                        inputs,
-                        compute_asset
-                    );
-                    for &output_id in outputs.iter() {
+                    log!(self.logger, "Did a computation with {:?} ", &parameterized_compute);
+                    for &output_id in parameterized_compute.outputs.iter() {
                         self.asset_store.insert(output_id, AssetData);
                     }
                     InsExecResult::Complete { added_assets_to_store: true }
@@ -127,6 +119,7 @@ impl Site {
             // Any instruction might be completable!
 
             let mut i = 0;
+            // loop invariant: todo instructions with indices in [0..i)] would return InsExecResult::Incomplete if checked with `try_complete`.
             while i < self.todo_instructions.len() {
                 let result = self.inner.try_complete(&mut self.todo_instructions[i]);
                 match result {
@@ -145,6 +138,8 @@ impl Site {
                     }
                 }
             }
+            // No instructions are completable.
+
             if self.todo_instructions.is_empty() {
                 log!(self.inner.logger, "Ran out of TODO instructions after {:?}", start.elapsed());
             }
