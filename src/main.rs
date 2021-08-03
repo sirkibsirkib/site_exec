@@ -15,6 +15,8 @@ use std::{
     fs::File,
     io::Write,
     path::Path,
+};
+use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -62,14 +64,14 @@ struct SiteIdManager {
     asset_index_seq_head: Option<AssetIndex>, // represents all AssetIds in range [asset_index_list..)
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
 struct ComputeArgs {
     inputs: Vec<AssetId>,
     outputs: Vec<AssetId>,
     compute_asset: AssetId,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Instruction {
     SendAssetTo { asset_id: AssetId, site_id: SiteId },
     AcquireAssetFrom { asset_id: AssetId, site_id: SiteId },

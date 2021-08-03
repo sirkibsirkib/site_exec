@@ -46,7 +46,7 @@ pub fn scenario_amy_bob_cho() {
         site_has_asset: maplit::hashset! { (SiteId(0), x), (SiteId(1), y) , (SiteId(2), f)  },
         do_compute: vec![ComputeArgs { inputs: vec![x, y], outputs: vec![z], compute_asset: f }],
     };
-    planning::plan(&problem, &mut allocator).unwrap();
+    planning::plan(&problem).unwrap();
 }
 
 pub fn amy_bob_cho() {
