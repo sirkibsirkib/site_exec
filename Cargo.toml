@@ -6,3 +6,4 @@ edition = "2018"
 [dependencies]
 crossbeam-utils = "0.8.5"
 maplit = "1.0.2"
+fnv = "1.0.7"

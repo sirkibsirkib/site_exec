@@ -24,27 +24,8 @@ use std::{
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 struct SiteId(u32);
 
-// AssetIndexes identify assets within some context (e.g. a particular Site).
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-struct AssetIndex(u32);
-
-// Asset IDs identify assets within an entire network ('globally')
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
-struct AssetId {
-    site_id: SiteId,
-    asset_index: AssetIndex,
-}
-
-trait AssetIdAllocator {
-    fn alloc_asset_id(&mut self) -> Option<AssetId>;
-}
-
-// "Asset Name" may be concrete (a global identifier) or abstract (meaningful within some implicit context)
-// #[derive(Copy, Clone, Eq, PartialEq, Hash)]
-// enum AssetName {
-//     Concrete { asset_id: AssetId },
-//     Abstract { index: AssetIndex },
-// }
+struct AssetId(u32);
 
 /// Message structure communicated between sites (over channels)
 #[derive(Debug)]
@@ -54,14 +35,8 @@ enum Msg {
 }
 
 #[derive(Debug, Clone)]
-struct AssetData;
-
-#[derive(Debug)]
-struct SiteIdManager {
-    my_site_id: SiteId,
-    // The following pair of fields keeps track of a pool of AssetIds available for allocation.
-    asset_index_list: Vec<AssetIndex>, // explicitly enumerates available AssetIds.
-    asset_index_seq_head: Option<AssetIndex>, // represents all AssetIds in range [asset_index_list..)
+struct AssetData {
+    bits: u64,
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
@@ -80,7 +55,8 @@ enum Instruction {
 
 #[derive(Debug)]
 struct SiteInner {
-    site_id_manager: SiteIdManager,
+    // site_id_manager: SiteIdManager,
+    site_id: SiteId,
     asset_store: HashMap<AssetId, AssetData>,
     inbox: mpsc::Receiver<Msg>,
     peer_outboxes: HashMap<SiteId, mpsc::Sender<Msg>>,
@@ -122,7 +98,7 @@ impl ComputeArgs {
 
 impl std::fmt::Debug for AssetId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("AssetId").field(&self.site_id.0).field(&self.asset_index.0).finish()
+        f.debug_tuple("AssetId").field(&self.0).finish()
     }
 }
 

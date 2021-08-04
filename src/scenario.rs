@@ -8,7 +8,7 @@ fn setup_network(network_config: NetworkConfig) -> HashMap<SiteId, Site> {
         let site = Site {
             todo_instructions: Default::default(),
             inner: SiteInner {
-                site_id_manager: SiteIdManager::new(site_id),
+                site_id,
                 inbox,
                 asset_store: Default::default(),
                 peer_outboxes: Default::default(),
@@ -32,11 +32,10 @@ fn setup_network(network_config: NetworkConfig) -> HashMap<SiteId, Site> {
 
 pub fn scenario_amy_bob_cho() {
     // Do the planning
-    let mut allocator = SiteIdManager::new(SiteId(42));
-    let x = allocator.alloc_asset_id().unwrap();
-    let y = allocator.alloc_asset_id().unwrap();
-    let z = allocator.alloc_asset_id().unwrap();
-    let f = allocator.alloc_asset_id().unwrap();
+    let x = AssetId(0);
+    let y = AssetId(1);
+    let z = AssetId(2);
+    let f = AssetId(3);
     let problem = Problem {
         may_access: maplit::hashset! {
             (SiteId(0), x), (SiteId(1), x),
@@ -72,67 +71,11 @@ pub fn scenario_amy_bob_cho() {
     }
 
     // give them their initial data
-    sites.get_mut(&AMY).unwrap().inner.asset_store.insert(x, AssetData);
-    sites.get_mut(&BOB).unwrap().inner.asset_store.insert(y, AssetData);
-    sites.get_mut(&CHO).unwrap().inner.asset_store.insert(f, AssetData);
+    sites.get_mut(&AMY).unwrap().inner.asset_store.insert(x, AssetData { bits: 0xDEADBEEF });
+    sites.get_mut(&BOB).unwrap().inner.asset_store.insert(y, AssetData { bits: 0xD00DEEDADA });
+    sites.get_mut(&CHO).unwrap().inner.asset_store.insert(f, AssetData { bits: 0xC0FEFE });
 
     // run the system
-    crossbeam_utils::thread::scope(|s| {
-        for site in sites.values_mut() {
-            s.spawn(move |_| site.execute());
-        }
-    })
-    .unwrap();
-}
-
-pub fn amy_bob_cho() {
-    /*
-    example scenario:
-    amy has X, bob has Y, cho has F
-    bob computes Z=F(X,Y)
-    amy gets Z
-    */
-    const AMY: SiteId = SiteId(0);
-    const BOB: SiteId = SiteId(1);
-    const CHO: SiteId = SiteId(2);
-    let mut sites = setup_network(NetworkConfig {
-        nodes: maplit::hashmap! {
-            AMY => FileLogger::new("./logs/amy.txt"),
-            BOB => FileLogger::new("./logs/bob.txt"),
-            CHO => FileLogger::new("./logs/cho.txt"),
-        },
-        bidir_edges: vec![[AMY, BOB], [BOB, CHO]],
-    });
-    println!("sites: {:#?}", &sites);
-    println!("--------------------------------------");
-
-    // AMY
-    let site = sites.get_mut(&AMY).unwrap();
-    // AMY allocates the identifiers for all assets, present and future (I, the planner, am using her allocator)
-    let aid_x = site.inner.site_id_manager.alloc_asset_id().unwrap(); // 0,0
-    let aid_y = site.inner.site_id_manager.alloc_asset_id().unwrap(); // 0,1
-    let aid_z = site.inner.site_id_manager.alloc_asset_id().unwrap(); // 0,2
-    let aid_f = site.inner.site_id_manager.alloc_asset_id().unwrap(); // 0,3
-                                                                      // "create" dataset X at AMY (dummy data)
-    site.inner.asset_store.insert(aid_x, AssetData);
-    // "create" dataset X at AMY (dummy data)
-    site.todo_instructions.push(Instruction::AcquireAssetFrom { asset_id: aid_z, site_id: BOB });
-    site.todo_instructions.push(Instruction::SendAssetTo { asset_id: aid_x, site_id: BOB });
-
-    // BOB
-    let site = sites.get_mut(&BOB).unwrap();
-    site.inner.asset_store.insert(aid_y, AssetData);
-    site.todo_instructions.push(Instruction::AcquireAssetFrom { asset_id: aid_f, site_id: CHO });
-    site.todo_instructions.push(Instruction::ComputeAssetData(ComputeArgs {
-        outputs: vec![aid_z],
-        inputs: vec![aid_x, aid_y],
-        compute_asset: aid_f,
-    }));
-
-    // CHO
-    let site = sites.get_mut(&CHO).unwrap();
-    site.inner.asset_store.insert(aid_f, AssetData);
-
     crossbeam_utils::thread::scope(|s| {
         for site in sites.values_mut() {
             s.spawn(move |_| site.execute());

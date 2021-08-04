@@ -5,40 +5,26 @@ enum InsExecResult {
     Complete { added_assets_to_store: bool },
 }
 
-impl AssetIdAllocator for SiteIdManager {
-    fn alloc_asset_id(&mut self) -> Option<AssetId> {
-        self.asset_index_list
-            .pop()
-            .or_else(|| {
-                self.asset_index_seq_head.take().map(|AssetIndex(i)| {
-                    if let Some(ip1) = i.checked_add(1) {
-                        self.asset_index_seq_head = Some(AssetIndex(ip1));
-                    } else {
-                        // leave self.asset_index_seq_head is None (for next time)
-                    }
-                    AssetIndex(i)
-                })
+fn actual_compute(
+    store: &HashMap<AssetId, AssetData>,
+    compute_args: &ComputeArgs,
+) -> Option<HashMap<AssetId, AssetData>> {
+    let mut hasher = fnv::FnvHasher::default();
+    use std::hash::Hasher;
+    for needed_asset in compute_args.needed_assets() {
+        hasher.write_u64(store.get(needed_asset)?.bits);
+    }
+    Some(
+        compute_args
+            .outputs
+            .iter()
+            .map(|&output_asset_id| {
+                let data = AssetData { bits: hasher.finish() };
+                hasher.write_u64(data.bits);
+                (output_asset_id, data)
             })
-            .map(|asset_index| AssetId { site_id: self.my_site_id, asset_index })
-    }
-}
-impl SiteIdManager {
-    pub fn new(my_site_id: SiteId) -> Self {
-        Self {
-            my_site_id,
-            // Initially, all AssetIndexes in range [0..) are available
-            asset_index_list: Default::default(),
-            asset_index_seq_head: Some(AssetIndex(0)),
-        }
-    }
-    pub fn try_free_asset_id(&mut self, asset_id: AssetId) -> bool {
-        if asset_id.site_id == self.my_site_id {
-            false
-        } else {
-            self.asset_index_list.push(asset_id.asset_index);
-            true
-        }
-    }
+            .collect(),
+    )
 }
 
 impl SiteInner {
@@ -63,10 +49,8 @@ impl SiteInner {
                 if !recent_request {
                     // Did not recently request this asset! Do so!
                     self.last_requested_at.insert(*asset_id, now);
-                    let msg = Msg::AssetDataRequest {
-                        asset_id: *asset_id,
-                        requester: self.site_id_manager.my_site_id,
-                    };
+                    let msg =
+                        Msg::AssetDataRequest { asset_id: *asset_id, requester: self.site_id };
                     self.send_to(*site_id, msg);
                 }
                 InsExecResult::Incomplete
@@ -87,9 +71,9 @@ impl SiteInner {
                     .all(|asset_id| self.asset_store.contains_key(&asset_id))
                 {
                     log!(self.logger, "Did a computation with {:?} ", &compute_args);
-                    for &output_id in compute_args.outputs.iter() {
-                        self.asset_store.insert(output_id, AssetData);
-                    }
+                    self.asset_store.extend(
+                        actual_compute(&self.asset_store, compute_args).expect("compute failed!"),
+                    );
                     InsExecResult::Complete { added_assets_to_store: true }
                 } else {
                     InsExecResult::Incomplete
@@ -100,16 +84,6 @@ impl SiteInner {
 }
 
 impl Site {
-    fn create_new_asset(&mut self, asset_data: AssetData) -> Result<AssetId, AssetData> {
-        match self.inner.site_id_manager.alloc_asset_id() {
-            None => Err(asset_data),
-            Some(asset_id) => {
-                self.inner.asset_store.insert(asset_id, asset_data);
-                Ok(asset_id)
-            }
-        }
-    }
-
     /// Consumes the calling thread
     pub fn execute(&mut self) {
         let start = Instant::now();
@@ -117,7 +91,7 @@ impl Site {
             self.inner.logger,
             "Started executing at {:?}. My site_id is {:?}",
             &start,
-            self.inner.site_id_manager.my_site_id,
+            self.inner.site_id,
         );
         'execute_loop: loop {
             // Any instruction might be completable!
@@ -157,7 +131,7 @@ impl Site {
                             self.inner.logger,
                             "RECV timeout with todo instructions {:#?} assets {:?}",
                             &self.todo_instructions,
-                            self.inner.asset_store.keys()
+                            &self.inner.asset_store
                         );
                         return;
                     }
