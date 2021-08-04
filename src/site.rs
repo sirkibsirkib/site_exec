@@ -113,7 +113,6 @@ impl Site {
     /// Consumes the calling thread
     pub fn execute(&mut self) {
         let start = Instant::now();
-
         log!(
             self.inner.logger,
             "Started executing at {:?}. My site_id is {:?}",

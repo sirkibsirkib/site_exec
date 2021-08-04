@@ -31,6 +31,7 @@ fn setup_network(network_config: NetworkConfig) -> HashMap<SiteId, Site> {
 }
 
 pub fn scenario_amy_bob_cho() {
+    // Do the planning
     let mut allocator = SiteIdManager::new(SiteId(42));
     let x = allocator.alloc_asset_id().unwrap();
     let y = allocator.alloc_asset_id().unwrap();
@@ -40,14 +41,48 @@ pub fn scenario_amy_bob_cho() {
         may_access: maplit::hashset! {
             (SiteId(0), x), (SiteId(1), x),
             (SiteId(1), y),
-            (SiteId(1), f), (SiteId(2), f)
+            (SiteId(1), f), (SiteId(2), f),
+            (SiteId(2), z), // TODO check have access to outputs
         },
         may_compute: maplit::hashset! { (SiteId(1), f) },
         site_has_asset: maplit::hashset! { (SiteId(0), x), (SiteId(1), y) , (SiteId(2), f)  },
         do_compute: vec![ComputeArgs { inputs: vec![x, y], outputs: vec![z], compute_asset: f }],
     };
     let planned = planning::plan(&problem).unwrap();
-    println!("{:#?}", &planned);
+    println!("planned: {:#?}\n------------------", &planned);
+
+    // setup the network
+    const AMY: SiteId = SiteId(0);
+    const BOB: SiteId = SiteId(1);
+    const CHO: SiteId = SiteId(2);
+    let mut sites = setup_network(NetworkConfig {
+        nodes: maplit::hashmap! {
+            AMY => FileLogger::new("./logs/amy.txt"),
+            BOB => FileLogger::new("./logs/bob.txt"),
+            CHO => FileLogger::new("./logs/cho.txt"),
+        },
+        bidir_edges: vec![[AMY, BOB], [BOB, CHO]],
+    });
+    println!("sites: {:#?}", &sites);
+    println!("--------------------------------------");
+
+    // give the sites their planned instructions
+    for (site_id, instructions) in planned {
+        sites.get_mut(&site_id).unwrap().todo_instructions.extend(instructions)
+    }
+
+    // give them their initial data
+    sites.get_mut(&AMY).unwrap().inner.asset_store.insert(x, AssetData);
+    sites.get_mut(&BOB).unwrap().inner.asset_store.insert(y, AssetData);
+    sites.get_mut(&CHO).unwrap().inner.asset_store.insert(f, AssetData);
+
+    // run the system
+    crossbeam_utils::thread::scope(|s| {
+        for site in sites.values_mut() {
+            s.spawn(move |_| site.execute());
+        }
+    })
+    .unwrap();
 }
 
 pub fn amy_bob_cho() {
