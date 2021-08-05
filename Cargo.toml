@@ -7,3 +7,6 @@ edition = "2018"
 crossbeam-utils = "0.8.5"
 maplit = "1.0.2"
 fnv = "1.0.7"
+crossbeam-channel = "0.5"
+ed25519-dalek = "1.0.1"
+rand_core = { version = "^0.5", features = ["getrandom"] }

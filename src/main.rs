@@ -10,19 +10,22 @@ mod planning;
 mod scenario;
 mod site;
 
+use core::hash::Hash;
+use crossbeam_channel::{Receiver, Sender};
+use ed25519_dalek::{ed25519, Keypair, PublicKey, Signature, Signer, Verifier};
+
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
     io::Write,
     path::Path,
-};
-use std::{
-    sync::mpsc,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-struct SiteId(u32);
+#[derive(Copy, Clone, Eq, PartialEq)]
+#[repr(transparent)]
+struct SiteId(PublicKey);
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 struct AssetId(u32);
@@ -32,6 +35,16 @@ struct AssetId(u32);
 enum Msg {
     AssetDataRequest { asset_id: AssetId, requester: SiteId },
     AssetData { asset_id: AssetId, asset_data: AssetData },
+}
+#[derive(Debug)]
+struct SignedMsg {
+    header: SignedMsgHeader,
+    msg: Msg,
+}
+#[derive(Debug)]
+struct SignedMsgHeader {
+    public_key: PublicKey,
+    signature: Signature,
 }
 
 #[derive(Debug, Clone)]
@@ -55,24 +68,18 @@ enum Instruction {
 
 #[derive(Debug)]
 struct SiteInner {
-    // site_id_manager: SiteIdManager,
-    site_id: SiteId,
+    keypair: Keypair,
+    outboxes: Arc<HashMap<SiteId, Sender<SignedMsg>>>,
     asset_store: HashMap<AssetId, AssetData>,
-    inbox: mpsc::Receiver<Msg>,
-    peer_outboxes: HashMap<SiteId, mpsc::Sender<Msg>>,
+    inbox: Receiver<SignedMsg>,
     last_requested_at: HashMap<AssetId, Instant>, // alternative: Sorted vector of (Instant, AssetId).
     logger: Box<dyn Logger>,
 }
 
 #[derive(Debug)]
 struct Site {
-    todo_instructions: Vec<Instruction>, // Order is irrelevant. Using a vector because its easily iterable.
     inner: SiteInner,
-}
-
-struct NetworkConfig {
-    nodes: HashMap<SiteId, Box<dyn Logger>>,
-    bidir_edges: Vec<[SiteId; 2]>,
+    todo_instructions: Vec<Instruction>, // Order is irrelevant. Using a vector because its easily iterable.
 }
 
 #[derive(Debug)]
@@ -88,8 +95,43 @@ enum PlanError<'a> {
     CyclicCausality(&'a ComputeArgs),
     NoSiteForCompute(&'a ComputeArgs),
 }
+trait HasSiteId {
+    fn site_id(&self) -> &SiteId;
+}
+impl HasSiteId for Keypair {
+    fn site_id(&self) -> &SiteId {
+        unsafe {
+            //safe!
+            core::mem::transmute(&self.public)
+        }
+    }
+}
 ////////////////////////////////////////////////
-
+impl Hash for SiteId {
+    fn hash<H: core::hash::Hasher>(&self, h: &mut H) {
+        self.0.as_bytes().hash(h)
+    }
+}
+impl Msg {
+    fn as_slice(&self) -> &[u8] {
+        unsafe {
+            // safe!
+            std::slice::from_raw_parts(
+                self as *const Msg as *const u8,
+                core::mem::size_of::<Self>(),
+            )
+        }
+    }
+    fn sign(self, keypair: &Keypair) -> SignedMsg {
+        let signature = keypair.sign(self.as_slice());
+        SignedMsg { header: SignedMsgHeader { public_key: keypair.public, signature }, msg: self }
+    }
+}
+impl SignedMsg {
+    fn verify(&self) -> Result<(), ed25519::Error> {
+        self.header.public_key.verify(self.msg.as_slice(), &self.header.signature)
+    }
+}
 impl ComputeArgs {
     fn needed_assets(&self) -> impl Iterator<Item = &AssetId> + '_ {
         self.inputs.iter().chain(Some(&self.compute_asset))
@@ -99,6 +141,14 @@ impl ComputeArgs {
 impl std::fmt::Debug for AssetId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("AssetId").field(&self.0).finish()
+    }
+}
+impl std::fmt::Debug for SiteId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0.as_bytes() {
+            write!(f, "{:X}", byte)?;
+        }
+        Ok(())
     }
 }
 
