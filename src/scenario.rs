@@ -2,6 +2,7 @@ use super::*;
 
 pub fn scenario_amy_bob_cho() {
     // Setup the network
+    std::fs::create_dir_all("./logs").expect("creating logging dir");
     let loggers = vec![
         FileLogger::new("./logs/amy.txt"),
         FileLogger::new("./logs/bob.txt"),
