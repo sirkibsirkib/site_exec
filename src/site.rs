@@ -5,6 +5,56 @@ enum InsExecResult {
     Complete { added_assets_to_store: bool },
 }
 
+//////////////////
+
+impl Msg {
+    pub fn sign(self, keypair: &Keypair) -> SignedMsg {
+        let signature = keypair.sign(any_as_u8_slice::<Msg>(&self));
+        SignedMsg { sender_public_key: keypair.public, signature, msg: self }
+    }
+}
+impl SignedMsg {
+    pub fn verify(&self) -> Result<(), ed25519::Error> {
+        self.sender_public_key.verify(any_as_u8_slice::<Msg>(&self.msg), &self.signature)
+    }
+    pub fn sender(&self) -> &SiteId {
+        SiteId::from_public_key_ref(&self.sender_public_key)
+    }
+}
+impl ComputeArgs {
+    pub fn needed_assets(&self) -> impl Iterator<Item = &AssetId> + '_ {
+        self.inputs.iter().chain(Some(&self.compute_asset))
+    }
+}
+
+impl std::fmt::Debug for AssetId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("AssetId").field(&self.0).finish()
+    }
+}
+impl std::fmt::Debug for SiteId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0.as_bytes() {
+            write!(f, "{:X}", byte)?;
+        }
+        Ok(())
+    }
+}
+
+impl SiteId {
+    pub(crate) fn from_public_key_ref(public_key: &PublicKey) -> &Self {
+        unsafe {
+            //safe! SiteId is a transparent newtype for PublicKey
+            core::mem::transmute(public_key)
+        }
+    }
+}
+impl Hash for SiteId {
+    fn hash<H: core::hash::Hasher>(&self, h: &mut H) {
+        self.0.as_bytes().hash(h)
+    }
+}
+
 pub(crate) fn new_sites(loggers: Vec<Box<dyn Logger>>) -> (Vec<SiteId>, HashMap<SiteId, Site>) {
     struct Parts {
         inbox: Receiver<SignedMsg>,
@@ -72,7 +122,12 @@ impl SiteInner {
 
     fn send_to(&mut self, dest_id: &SiteId, msg: Msg) {
         log!(self.logger, "Sending to {:?} msg {:?}", dest_id, &msg);
-        self.outboxes.get(dest_id).unwrap().send(msg.sign(&self.keypair)).unwrap();
+        let signed_msg = msg.sign(&self.keypair);
+        // let mut signed_msg = msg.sign(&self.keypair);
+        // let mut sig = signed_msg.signature.to_bytes();
+        // sig[2] ^= !0;
+        // signed_msg.signature = Signature::new(sig);
+        self.outboxes.get(dest_id).unwrap().send(signed_msg).unwrap();
     }
     fn try_complete(&mut self, instruction: &mut Instruction) -> InsExecResult {
         match instruction {

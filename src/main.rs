@@ -33,18 +33,14 @@ struct AssetId(u32);
 /// Message structure communicated between sites (over channels)
 #[derive(Debug)]
 enum Msg {
-    AssetDataRequest { asset_id: AssetId }, // requester is implicit now that messages are signed
+    AssetDataRequest { asset_id: AssetId }, // requester is implicit because messages are signed
     AssetData { asset_id: AssetId, asset_data: AssetData },
 }
 #[derive(Debug)]
 struct SignedMsg {
-    header: SignedMsgHeader,
-    msg: Msg,
-}
-#[derive(Debug)]
-struct SignedMsgHeader {
     sender_public_key: PublicKey,
     signature: Signature,
+    msg: Msg,
 }
 
 #[derive(Debug, Clone)]
@@ -96,78 +92,21 @@ enum PlanError<'a> {
     NoSiteForCompute(&'a ComputeArgs),
 }
 
-////////////////////////////////////////////////
-impl SiteId {
-    fn from_public_key_ref(public_key: &PublicKey) -> &Self {
-        unsafe {
-            //safe!
-            core::mem::transmute(public_key)
-        }
-    }
-    fn to_public_key_ref(&self) -> &PublicKey {
-        unsafe {
-            //safe!
-            core::mem::transmute(&self)
-        }
-    }
-}
-impl Hash for SiteId {
-    fn hash<H: core::hash::Hasher>(&self, h: &mut H) {
-        self.0.as_bytes().hash(h)
-    }
-}
-impl Msg {
-    fn as_slice(&self) -> &[u8] {
-        unsafe {
-            // safe!
-            std::slice::from_raw_parts(
-                self as *const Msg as *const u8,
-                core::mem::size_of::<Self>(),
-            )
-        }
-    }
-    fn sign(self, keypair: &Keypair) -> SignedMsg {
-        let signature = keypair.sign(self.as_slice());
-        SignedMsg {
-            header: SignedMsgHeader { sender_public_key: keypair.public, signature },
-            msg: self,
-        }
-    }
-}
-impl SignedMsg {
-    fn verify(&self) -> Result<(), ed25519::Error> {
-        self.header.sender_public_key.verify(self.msg.as_slice(), &self.header.signature)
-    }
-    fn sender(&self) -> &SiteId {
-        SiteId::from_public_key_ref(&self.header.sender_public_key)
-    }
-}
-impl ComputeArgs {
-    fn needed_assets(&self) -> impl Iterator<Item = &AssetId> + '_ {
-        self.inputs.iter().chain(Some(&self.compute_asset))
-    }
-}
-
-impl std::fmt::Debug for AssetId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("AssetId").field(&self.0).finish()
-    }
-}
-impl std::fmt::Debug for SiteId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for byte in self.0.as_bytes() {
-            write!(f, "{:X}", byte)?;
-        }
-        Ok(())
-    }
-}
-
 trait Logger: std::fmt::Debug + Send {
     fn line_writer(&mut self) -> Option<&mut dyn Write>;
 }
+
 #[derive(Debug)]
 struct FileLogger {
     file: std::fs::File,
+}
+////////////////////////////////////////////////
+fn any_as_u8_slice<T: Sized>(thing: &T) -> &[u8] {
+    // source: https://stackoverflow.com/questions/28127165/how-to-convert-struct-to-u8
+    unsafe {
+        // safe! will certainly only read initialized memory
+        std::slice::from_raw_parts(thing as *const T as *const u8, std::mem::size_of::<T>())
+    }
 }
 impl FileLogger {
     fn new(path: impl AsRef<Path>) -> Box<dyn Logger> {
