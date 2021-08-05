@@ -33,7 +33,7 @@ struct AssetId(u32);
 /// Message structure communicated between sites (over channels)
 #[derive(Debug)]
 enum Msg {
-    AssetDataRequest { asset_id: AssetId, requester: SiteId },
+    AssetDataRequest { asset_id: AssetId }, // requester is implicit now that messages are signed
     AssetData { asset_id: AssetId, asset_data: AssetData },
 }
 #[derive(Debug)]
@@ -43,7 +43,7 @@ struct SignedMsg {
 }
 #[derive(Debug)]
 struct SignedMsgHeader {
-    public_key: PublicKey,
+    sender_public_key: PublicKey,
     signature: Signature,
 }
 
@@ -95,18 +95,22 @@ enum PlanError<'a> {
     CyclicCausality(&'a ComputeArgs),
     NoSiteForCompute(&'a ComputeArgs),
 }
-trait HasSiteId {
-    fn site_id(&self) -> &SiteId;
-}
-impl HasSiteId for Keypair {
-    fn site_id(&self) -> &SiteId {
+
+////////////////////////////////////////////////
+impl SiteId {
+    fn from_public_key_ref(public_key: &PublicKey) -> &Self {
         unsafe {
             //safe!
-            core::mem::transmute(&self.public)
+            core::mem::transmute(public_key)
+        }
+    }
+    fn to_public_key_ref(&self) -> &PublicKey {
+        unsafe {
+            //safe!
+            core::mem::transmute(&self)
         }
     }
 }
-////////////////////////////////////////////////
 impl Hash for SiteId {
     fn hash<H: core::hash::Hasher>(&self, h: &mut H) {
         self.0.as_bytes().hash(h)
@@ -124,12 +128,18 @@ impl Msg {
     }
     fn sign(self, keypair: &Keypair) -> SignedMsg {
         let signature = keypair.sign(self.as_slice());
-        SignedMsg { header: SignedMsgHeader { public_key: keypair.public, signature }, msg: self }
+        SignedMsg {
+            header: SignedMsgHeader { sender_public_key: keypair.public, signature },
+            msg: self,
+        }
     }
 }
 impl SignedMsg {
     fn verify(&self) -> Result<(), ed25519::Error> {
-        self.header.public_key.verify(self.msg.as_slice(), &self.header.signature)
+        self.header.sender_public_key.verify(self.msg.as_slice(), &self.header.signature)
+    }
+    fn sender(&self) -> &SiteId {
+        SiteId::from_public_key_ref(&self.header.sender_public_key)
     }
 }
 impl ComputeArgs {

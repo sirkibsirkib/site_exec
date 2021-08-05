@@ -17,7 +17,7 @@ pub(crate) fn new_sites(loggers: Vec<Box<dyn Logger>>) -> (Vec<SiteId>, HashMap<
     for logger in loggers {
         let keypair = Keypair::generate(&mut rand_core::OsRng);
         let (outbox, inbox) = crossbeam_channel::unbounded();
-        let site_id = *keypair.site_id();
+        let site_id = *SiteId::from_public_key_ref(&keypair.public);
 
         outboxes.insert(site_id, outbox);
         site_ids.push(site_id);
@@ -27,7 +27,7 @@ pub(crate) fn new_sites(loggers: Vec<Box<dyn Logger>>) -> (Vec<SiteId>, HashMap<
     let sites = parts
         .into_iter()
         .map(|Parts { inbox, logger, keypair }| {
-            let site_id = *keypair.site_id();
+            let site_id = *SiteId::from_public_key_ref(&keypair.public);
             let site = Site {
                 inner: SiteInner {
                     keypair,
@@ -70,9 +70,9 @@ fn actual_compute(
 impl SiteInner {
     const REQUEST_PERIOD: Duration = Duration::from_millis(300);
 
-    fn send_to(&mut self, dest_id: SiteId, msg: Msg) {
+    fn send_to(&mut self, dest_id: &SiteId, msg: Msg) {
         log!(self.logger, "Sending to {:?} msg {:?}", dest_id, &msg);
-        self.outboxes.get(&dest_id).unwrap().send(msg.sign(&self.keypair)).unwrap();
+        self.outboxes.get(dest_id).unwrap().send(msg.sign(&self.keypair)).unwrap();
     }
     fn try_complete(&mut self, instruction: &mut Instruction) -> InsExecResult {
         match instruction {
@@ -89,11 +89,8 @@ impl SiteInner {
                 if !recent_request {
                     // Did not recently request this asset! Do so!
                     self.last_requested_at.insert(*asset_id, now);
-                    let msg = Msg::AssetDataRequest {
-                        asset_id: *asset_id,
-                        requester: *self.keypair.site_id(),
-                    };
-                    self.send_to(*site_id, msg);
+                    let msg = Msg::AssetDataRequest { asset_id: *asset_id };
+                    self.send_to(site_id, msg);
                 }
                 InsExecResult::Incomplete
             }
@@ -101,7 +98,7 @@ impl SiteInner {
                 if let Some(asset_data) = self.asset_store.get(&asset_id) {
                     let msg =
                         Msg::AssetData { asset_id: *asset_id, asset_data: asset_data.clone() };
-                    self.send_to(*site_id, msg);
+                    self.send_to(site_id, msg);
                     InsExecResult::Complete { added_assets_to_store: false }
                 } else {
                     InsExecResult::Incomplete
@@ -133,7 +130,7 @@ impl Site {
             self.inner.logger,
             "Started executing at {:?}. My site_id is {:?}",
             &start,
-            self.inner.keypair.site_id(),
+            SiteId::from_public_key_ref(&self.inner.keypair.public),
         );
         'execute_loop: loop {
             // Any instruction might be completable!
@@ -184,13 +181,15 @@ impl Site {
                 }
                 log!(self.inner.logger, "Received verfied msg {:?}", &signed_msg.msg);
                 match signed_msg.msg {
-                    Msg::AssetDataRequest { asset_id, requester } => {
+                    Msg::AssetDataRequest { asset_id } => {
                         if let Some(asset_data) = self.inner.asset_store.get(&asset_id) {
                             let msg = Msg::AssetData { asset_id, asset_data: asset_data.clone() };
-                            self.inner.send_to(requester, msg);
+                            self.inner.send_to(signed_msg.sender(), msg);
                         } else {
-                            self.todo_instructions
-                                .push(Instruction::SendAssetTo { asset_id, site_id: requester });
+                            self.todo_instructions.push(Instruction::SendAssetTo {
+                                asset_id,
+                                site_id: *signed_msg.sender(),
+                            });
                         }
                     }
                     Msg::AssetData { asset_id, asset_data } => {
